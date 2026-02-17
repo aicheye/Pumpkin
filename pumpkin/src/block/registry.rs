@@ -68,6 +68,7 @@ use crate::block::blocks::pumpkin::PumpkinBlock;
 use crate::block::blocks::redstone::buttons::ButtonBlock;
 use crate::block::blocks::redstone::comparator::ComparatorBlock;
 use crate::block::blocks::redstone::copper_bulb::CopperBulbBlock;
+use crate::block::blocks::redstone::daylight_detector::DaylightDetectorBlock;
 use crate::block::blocks::redstone::dispenser::DispenserBlock;
 use crate::block::blocks::redstone::dropper::DropperBlock;
 use crate::block::blocks::redstone::lever::LeverBlock;
@@ -274,6 +275,7 @@ pub fn default_registry() -> Arc<BlockRegistry> {
     manager.register(RedstoneWireBlock);
     manager.register(RepeaterBlock);
     manager.register(ComparatorBlock);
+    manager.register(DaylightDetectorBlock);
     manager.register(TargetBlock);
     manager.register(BarrelBlock);
     manager.register(HopperBlock);

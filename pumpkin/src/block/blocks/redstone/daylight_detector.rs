@@ -25,20 +25,18 @@ fn time_of_day(day_time: i64) -> f32 {
     ((d * 2.0 + e) / 3.0) as f32
 }
 
-/// Calculates the amount to subtract from the sky light level based on time of day and weather conditions.
-fn calculate_sky_light_subtraction(time: i64, rain_grad: f32, thunder_grad: f32) -> u8 {
+/// Calculates the sky darken value (0..11) based on time of day and weather, matching Java logic.
+fn calculate_sky_darken(time: i64, rain_grad: f32, thunder_grad: f32) -> i32 {
     let time_of_day = time_of_day(time);
+    let mut sky_darken = 1.0 - ((time_of_day * std::f32::consts::PI * 2.0).cos() * 2.0 + 0.5);
 
-    // Brightness factor (0.0=Dark, 1.0=Bright)
-    let cos_val = (time_of_day * std::f32::consts::PI * 2.0).cos();
-    let brightness = 0.5 + 2.0 * cos_val.clamp(-0.25, 0.25);
+    sky_darken = sky_darken.clamp(0.0, 1.0);
+    sky_darken = 1.0 - sky_darken;
+    sky_darken *= 1.0 - (rain_grad * 5.0) / 16.0;
+    sky_darken *= 1.0 - (thunder_grad * 5.0) / 16.0;
+    sky_darken = 1.0 - sky_darken;
 
-    // Apply weather (Rain/Thunder makes it darker -> less brightness)
-    let brightness = brightness * (1.0 - (rain_grad * 5.0) / 16.0);
-    let brightness = brightness * (1.0 - (thunder_grad * 5.0) / 16.0);
-
-    // Subtraction amount (0..11)
-    ((1.0 - brightness) * 11.0) as u8
+    (sky_darken * 11.0) as i32
 }
 
 /// Calculates the sun angle (0..2*PI) based on the time of day, used for power calculation when not inverted.
@@ -46,8 +44,8 @@ fn get_sun_angle(time: i64) -> f32 {
     time_of_day(time) * std::f32::consts::PI * 2.0
 }
 
-/// Calculates the internal light level (0..15) for a daylight detector at the given position and time.
-async fn calculate_internal_light(world: &World, position: &BlockPos, time: i64) -> u8 {
+/// Calculates the internal light level for a daylight detector at the given position and time.
+async fn calculate_internal_light(world: &World, position: &BlockPos, time: i64) -> i32 {
     let sky_light = world
         .level
         .light_engine
@@ -60,9 +58,8 @@ async fn calculate_internal_light(world: &World, position: &BlockPos, time: i64)
         (weather.rain_level, weather.thunder_level)
     };
 
-    let subtracted = calculate_sky_light_subtraction(time, rain, thunder);
-
-    sky_light.saturating_sub(subtracted)
+    let sky_darken = calculate_sky_darken(time, rain, thunder);
+    sky_light as i32 - sky_darken
 }
 
 /// Calculates the redstone power level (0..15) based on the internal light level, inverted state, and time of day.
@@ -94,7 +91,7 @@ async fn update_state(
     current_power: Integer0To15,
 ) {
     let time = world.level_time.lock().await.query_daytime();
-    let internal_light = calculate_internal_light(world, position, time).await as i32;
+    let internal_light = calculate_internal_light(world, position, time).await;
     let new_power = calculate_power(internal_light, inverted, time);
 
     if new_power != current_power {
@@ -115,7 +112,7 @@ async fn update_state(
 impl BlockBehaviour for DaylightDetectorBlock {
     fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            // Only tick in dimensions with skylight (matches Java getTicker null check)
+            // Only tick in dimensions with skylight
             if args.world.dimension.has_skylight {
                 args.world
                     .schedule_block_tick(args.block, *args.position, 20, TickPriority::Normal)
@@ -175,20 +172,17 @@ impl BlockBehaviour for DaylightDetectorBlock {
         })
     }
 
-    fn emits_redstone_power<'a>(
-        &'a self,
-        _args: EmitsRedstonePowerArgs<'a>,
-    ) -> BlockFuture<'a, bool> {
+    fn emits_redstone_power<'a>(&'a self, _: EmitsRedstonePowerArgs<'a>) -> BlockFuture<'a, bool> {
         Box::pin(async move { true })
     }
 
     fn get_weak_redstone_power<'a>(
         &'a self,
-        _args: GetRedstonePowerArgs<'a>,
+        args: GetRedstonePowerArgs<'a>,
     ) -> BlockFuture<'a, u8> {
         Box::pin(async move {
-            let state = _args.world.get_block_state(_args.position).await;
-            let props = DaylightDetectorLikeProperties::from_state_id(state.id, _args.block);
+            let state = args.world.get_block_state(args.position).await;
+            let props = DaylightDetectorLikeProperties::from_state_id(state.id, args.block);
             Integer0To15::to_index(&props.power) as u8
         })
     }

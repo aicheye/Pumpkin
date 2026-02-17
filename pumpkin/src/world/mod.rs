@@ -2847,12 +2847,18 @@ impl World {
             }
         }
 
-        let (_chunk_coordinate, _) = position.chunk_and_chunk_relative_position();
-
-        level
-            .light_engine
-            .update_lighting_at(level, *position)
-            .await;
+        // Only update lighting when the block's light-related properties actually changed.
+        // This matches vanilla's WorldChunk.setBlockState which conditionally relights.
+        // Prevents the runtime engine from corrupting correctly-computed sky light values
+        // when only non-light properties change (e.g. daylight detector power).
+        let old_state = BlockState::from_id(replaced_block_state_id);
+        let new_state = BlockState::from_id(block_state_id);
+        if old_state.opacity != new_state.opacity || old_state.luminance != new_state.luminance {
+            level
+                .light_engine
+                .update_lighting_at(level, *position)
+                .await;
+        }
 
         replaced_block_state_id
     }

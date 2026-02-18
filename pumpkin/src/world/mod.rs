@@ -268,7 +268,8 @@ impl World {
     /// Used for sun angle calculations.
     pub async fn get_time_of_day(&self) -> f32 {
         let time = self.level_time.lock().await.query_daytime();
-        let d = ((time as f64) / 24000.0 - 0.25).fract();
+        let d = (time as f64) / 24000.0 - 0.25;
+        let d = d - d.floor();
         let e = 0.5 - (d * std::f64::consts::PI).cos() / 2.0;
         ((d * 2.0 + e) / 3.0) as f32
     }

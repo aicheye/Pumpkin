@@ -18,34 +18,8 @@ use crate::{
 #[pumpkin_block("minecraft:daylight_detector")]
 pub struct DaylightDetectorBlock;
 
-/// Calculates the time of day factor (0.0..1.0) based on the given day time, used for brightness and sun angle calculations.
-fn time_of_day(day_time: i64) -> f32 {
-    let d = ((day_time as f64) / 24000.0 - 0.25).fract();
-    let e = 0.5 - (d * std::f64::consts::PI).cos() / 2.0;
-    ((d * 2.0 + e) / 3.0) as f32
-}
-
-/// Calculates the sky darken value (0..11) based on time of day and weather, matching Java logic.
-fn calculate_sky_darken(time: i64, rain_grad: f32, thunder_grad: f32) -> i32 {
-    let time_of_day = time_of_day(time);
-    let mut sky_darken = 1.0 - ((time_of_day * std::f32::consts::PI * 2.0).cos() * 2.0 + 0.5);
-
-    sky_darken = sky_darken.clamp(0.0, 1.0);
-    sky_darken = 1.0 - sky_darken;
-    sky_darken *= 1.0 - (rain_grad * 5.0) / 16.0;
-    sky_darken *= 1.0 - (thunder_grad * 5.0) / 16.0;
-    sky_darken = 1.0 - sky_darken;
-
-    (sky_darken * 11.0) as i32
-}
-
-/// Calculates the sun angle (0..2*PI) based on the time of day, used for power calculation when not inverted.
-fn get_sun_angle(time: i64) -> f32 {
-    time_of_day(time) * std::f32::consts::PI * 2.0
-}
-
 /// Calculates the internal light level for a daylight detector at the given position and time.
-async fn calculate_internal_light(world: &World, position: &BlockPos, time: i64) -> i32 {
+async fn calculate_internal_light(world: &World, position: &BlockPos) -> i32 {
     let sky_light = world
         .level
         .light_engine
@@ -53,21 +27,16 @@ async fn calculate_internal_light(world: &World, position: &BlockPos, time: i64)
         .await
         .unwrap_or(0);
 
-    let (rain, thunder) = {
-        let weather = world.weather.lock().await;
-        (weather.rain_level, weather.thunder_level)
-    };
-
-    let sky_darken = calculate_sky_darken(time, rain, thunder);
+    let sky_darken = world.get_ambient_darkness().await;
     sky_light as i32 - sky_darken
 }
 
 /// Calculates the redstone power level (0..15) based on the internal light level, inverted state, and time of day.
-fn calculate_power(internal_light: i32, inverted: bool, time: i64) -> Integer0To15 {
+fn calculate_power(internal_light: i32, inverted: bool, time_of_day: f32) -> Integer0To15 {
     let signal = if inverted {
         15 - internal_light
     } else if internal_light > 0 {
-        let mut sun_angle = get_sun_angle(time);
+        let mut sun_angle = time_of_day * 2.0 * std::f32::consts::PI;
         let target = if sun_angle < std::f32::consts::PI {
             0.0
         } else {
@@ -90,9 +59,9 @@ async fn update_state(
     inverted: bool,
     current_power: Integer0To15,
 ) {
-    let time = world.level_time.lock().await.query_daytime();
-    let internal_light = calculate_internal_light(world, position, time).await;
-    let new_power = calculate_power(internal_light, inverted, time);
+    let time_of_day = world.get_time_of_day().await;
+    let internal_light = calculate_internal_light(world, position).await;
+    let new_power = calculate_power(internal_light, inverted, time_of_day);
 
     if new_power != current_power {
         let props = DaylightDetectorLikeProperties {

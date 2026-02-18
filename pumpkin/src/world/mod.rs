@@ -264,6 +264,35 @@ impl World {
             .unwrap_or("world")
     }
 
+    /// Calculates the time of day factor (0.0..1.0) based on the given day time.
+    /// Used for sun angle calculations.
+    pub async fn get_time_of_day(&self) -> f32 {
+        let time = self.level_time.lock().await.query_daytime();
+        let d = ((time as f64) / 24000.0 - 0.25).fract();
+        let e = 0.5 - (d * std::f64::consts::PI).cos() / 2.0;
+        ((d * 2.0 + e) / 3.0) as f32
+    }
+
+    /// Calculates the current ambient darkness level (0..11) based on the time of day and weather conditions.
+    pub async fn get_ambient_darkness(&self) -> i32 {
+        let time_of_day = self.get_time_of_day().await;
+        let mut sky_darken = 1.0 - ((time_of_day * std::f32::consts::PI * 2.0).cos() * 2.0 + 0.5);
+
+        sky_darken = sky_darken.clamp(0.0, 1.0);
+        sky_darken = 1.0 - sky_darken;
+
+        let (rain_grad, thunder_grad) = {
+            let weather = self.weather.lock().await;
+            (weather.rain_level, weather.thunder_level)
+        };
+
+        sky_darken *= 1.0 - (rain_grad * 5.0) / 16.0;
+        sky_darken *= 1.0 - (thunder_grad * 5.0) / 16.0;
+        sky_darken = 1.0 - sky_darken;
+
+        (sky_darken * 11.0) as i32
+    }
+
     pub async fn shutdown(&self) {
         for entity in self.entities.load().iter() {
             self.save_entity(entity).await;
